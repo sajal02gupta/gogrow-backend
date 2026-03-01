@@ -63,6 +63,12 @@ class SessionAuthenticationFilter(
             writeUnauthorized(response, "Session not found.")
             return
         }
+        if (session.user.deletedAt != null) {
+            session.revokedAt = Instant.now()
+            authSessionRepository.save(session)
+            writeUnauthorized(response, "User account is deleted.")
+            return
+        }
 
         val now = Instant.now()
         val inactivityThreshold = now.minus(authProperties.sessionInactivityDays, ChronoUnit.DAYS)
@@ -81,7 +87,6 @@ class SessionAuthenticationFilter(
 
         val principal = AuthenticatedPrincipal(
             userId = session.user.id!!,
-            phoneNumber = session.user.phoneNumber,
         )
         SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(
             principal,

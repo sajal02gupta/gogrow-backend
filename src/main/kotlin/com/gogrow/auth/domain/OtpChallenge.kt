@@ -12,6 +12,7 @@ import java.time.Instant
 @Entity
 @Table(
     name = "otp_challenge",
+    schema = "auth",
     indexes = [
         Index(name = "idx_otp_challenge_phone_number", columnList = "phone_number"),
     ],

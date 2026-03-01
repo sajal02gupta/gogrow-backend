@@ -12,7 +12,7 @@ import jakarta.persistence.Table
 import java.time.Instant
 
 @Entity
-@Table(name = "auth_session")
+@Table(name = "auth_session", schema = "auth")
 class AuthSession(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

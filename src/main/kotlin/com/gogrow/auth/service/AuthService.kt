@@ -2,6 +2,8 @@ package com.gogrow.auth.service
 
 import com.gogrow.auth.AuthProperties
 import com.gogrow.auth.api.RequestOtpResponse
+import com.gogrow.auth.api.UpdateUserRequest
+import com.gogrow.auth.api.UserResponse
 import com.gogrow.auth.api.VerifyOtpResponse
 import com.gogrow.auth.domain.AppUser
 import com.gogrow.auth.domain.AuthSession
@@ -16,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException
 import java.security.SecureRandom
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 
 @Service
 class AuthService(
@@ -27,6 +30,7 @@ class AuthService(
 ) {
     private val secureRandom = SecureRandom()
     private val phoneRegex = Regex("^\\+?[1-9]\\d{7,14}$")
+    private val emailRegex = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$")
 
     @Transactional
     fun requestOtp(rawPhoneNumber: String): RequestOtpResponse {
@@ -44,7 +48,7 @@ class AuthService(
         return RequestOtpResponse(
             message = "OTP generated successfully.",
             expiresAt = challenge.expiresAt,
-            otp = if (authProperties.debugReturnOtp == false) otp else null,
+            otp = if (authProperties.debugReturnOtp) otp else null,
         )
     }
 
@@ -78,8 +82,11 @@ class AuthService(
         challenge.consumedAt = now
         otpChallengeRepository.save(challenge)
 
-        val user = userRepository.findByPhoneNumber(phoneNumber).orElseGet {
-            userRepository.save(AppUser(phoneNumber = phoneNumber, createdAt = now))
+        val user = userRepository.findByPhone(phoneNumber).orElseGet {
+            userRepository.save(AppUser(phone = phoneNumber, createdAt = now, modifiedAt = now))
+        }
+        if (user.deletedAt != null) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "User account is deleted.")
         }
 
         val token = authTokenCodec.generateToken()
@@ -94,6 +101,7 @@ class AuthService(
         return VerifyOtpResponse(
             accessToken = token,
             sessionInactivityDays = authProperties.sessionInactivityDays,
+            user = user.toResponse(),
         )
     }
 
@@ -103,6 +111,63 @@ class AuthService(
         val session = authSessionRepository.findByTokenHash(tokenHash) ?: return
         session.revokedAt = Instant.now()
         authSessionRepository.save(session)
+    }
+
+    @Transactional(readOnly = true)
+    fun getUserById(userId: UUID): UserResponse {
+        val user = userRepository.findByIdAndDeletedAtIsNull(userId)
+            .orElseThrow { ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found.") }
+        return user.toResponse()
+    }
+
+    @Transactional
+    fun updateUser(userId: UUID, request: UpdateUserRequest): UserResponse {
+        val user = userRepository.findByIdAndDeletedAtIsNull(userId)
+            .orElseThrow { ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found.") }
+
+        request.name?.let {
+            user.name = it.trim().ifBlank { null }
+        }
+
+        request.email?.let {
+            val normalizedEmail = it.trim().lowercase()
+            if (normalizedEmail.isBlank()) {
+                user.email = null
+            } else {
+                if (!emailRegex.matches(normalizedEmail)) {
+                    throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid email format.")
+                }
+                user.email = normalizedEmail
+            }
+        }
+
+        request.phone?.let {
+            val normalizedPhone = normalizeAndValidatePhone(it)
+            val existingUser = userRepository.findByPhone(normalizedPhone).orElse(null)
+            if (existingUser != null && existingUser.id != user.id) {
+                throw ResponseStatusException(HttpStatus.CONFLICT, "Phone number is already in use.")
+            }
+            user.phone = normalizedPhone
+        }
+
+        val savedUser = userRepository.save(user)
+        return savedUser.toResponse()
+    }
+
+    @Transactional
+    fun softDeleteUser(userId: UUID): Map<String, String> {
+        val user = userRepository.findByIdAndDeletedAtIsNull(userId)
+            .orElseThrow { ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found.") }
+
+        val now = Instant.now()
+        user.deletedAt = now
+        userRepository.save(user)
+
+        val activeSessions = authSessionRepository.findAllByUser_IdAndRevokedAtIsNull(userId)
+        activeSessions.forEach { it.revokedAt = now }
+        authSessionRepository.saveAll(activeSessions)
+
+        return mapOf("message" to "User soft deleted successfully.")
     }
 
     private fun normalizeAndValidatePhone(rawPhoneNumber: String): String {
@@ -117,4 +182,15 @@ class AuthService(
     }
 
     private fun generateOtp(): String = (100000 + secureRandom.nextInt(900000)).toString()
+
+    private fun AppUser.toResponse(): UserResponse =
+        UserResponse(
+            id = id!!,
+            name = name,
+            email = email,
+            phone = phone,
+            createdAt = createdAt,
+            modifiedAt = modifiedAt,
+            deletedAt = deletedAt,
+        )
 }

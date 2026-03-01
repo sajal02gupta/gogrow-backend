@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import org.springframework.http.HttpHeaders
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
@@ -45,12 +46,25 @@ class AuthController(
 
     @GetMapping("/me")
     @SecurityRequirement(name = "bearerAuth")
-    fun me(authentication: Authentication): MeResponse {
+    fun me(authentication: Authentication): UserResponse {
         val principal = authentication.principal as? AuthenticatedPrincipal
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized")
-        return MeResponse(
-            userId = principal.userId,
-            phoneNumber = principal.phoneNumber,
-        )
+        return authService.getUserById(principal.userId)
+    }
+
+    @PatchMapping("/me")
+    @SecurityRequirement(name = "bearerAuth")
+    fun updateMe(authentication: Authentication, @RequestBody request: UpdateUserRequest): UserResponse {
+        val principal = authentication.principal as? AuthenticatedPrincipal
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized")
+        return authService.updateUser(principal.userId, request)
+    }
+
+    @PostMapping("/me/delete")
+    @SecurityRequirement(name = "bearerAuth")
+    fun softDeleteMe(authentication: Authentication): Map<String, String> {
+        val principal = authentication.principal as? AuthenticatedPrincipal
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized")
+        return authService.softDeleteUser(principal.userId)
     }
 }
