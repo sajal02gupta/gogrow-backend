@@ -5,7 +5,7 @@ create table if not exists core.player (
     deleted_at timestamp with time zone,
     name varchar(255),
     gender varchar(16) check (gender in ('MALE', 'FEMALE', 'OTHER')),
-    profile_image_url varchar(1024)
+    profile_image_url varchar(1024),
     created_at timestamp with time zone not null,
     modified_at timestamp with time zone
 );
